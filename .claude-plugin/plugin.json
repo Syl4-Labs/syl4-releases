@@ -1,0 +1,19 @@
+{
+  "name": "syl4",
+  "displayName": "syl4",
+  "description": "Runs prompts reliably using syl4 — for example: syl4 what is the sum of first 100 integers. /syl4:install downloads the syl4 CLI, connects it to your server, and signs you in.",
+  "author": {
+    "name": "Sylmarel",
+    "url": "https://github.com/Syl4-Labs"
+  },
+  "homepage": "https://github.com/Syl4-Labs/syl4-releases",
+  "repository": "https://github.com/Syl4-Labs/syl4-releases",
+  "keywords": ["syl4", "verified-programs", "data"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {
+    "syl4": {
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/syl4-mcp.sh"]
+    }
+  }
+}
