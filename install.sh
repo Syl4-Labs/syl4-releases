@@ -17,7 +17,8 @@
 #     binary cannot vouch for the binary, and verifying needs gh, which a
 #     stock box does not have.
 #   - curl sets no com.apple.quarantine, so macOS needs no xattr step.
-#   - Installs to ~/.syl4/bin (no sudo) by default.
+#   - Installs to ~/.syl4/bin (no sudo) by default, with the release's
+#     THIRD_PARTY_NOTICES.txt (checked against SHA256SUMS) beside the binary.
 #
 # Environment overrides:
 #   SYL4_VERSION      release tag to install (e.g. v0.0.1); default: latest
@@ -49,11 +50,21 @@ fail() {
     exit 1
 }
 
+# A non-fatal problem: same layout as fail(), but the install carries on.
+warn() {
+    echo "install.sh: warning: $1" >&2
+    shift
+    for detail in "$@"; do
+        echo "  $detail" >&2
+    done
+}
+
 main() {
     REPO="Syl4-Labs/syl4-releases"
     SOURCE_REPO="Syl4-Labs/syl4"
     SIGNER_WORKFLOW="$SOURCE_REPO/.github/workflows/cli-release.yml"
     BUNDLE="syl4.attestation.jsonl"
+    NOTICES="THIRD_PARTY_NOTICES.txt"
     # HOME is not guaranteed (service managers, minimal containers, cron).
     # Naming the override beats `set -u` aborting with a bare line number.
     if [ -z "${SYL4_INSTALL_DIR:-}" ] && [ -z "${HOME:-}" ]; then
@@ -118,10 +129,12 @@ main() {
     # deleted temp dir, reporting a successful install and exit 0.
     staged=""
     staged_bundle=""
+    staged_notices=""
     cleanup() {
         rm -rf "$tmp"
         [ -n "$staged" ] && rm -f "$staged"
         [ -n "$staged_bundle" ] && rm -f "$staged_bundle"
+        [ -n "$staged_notices" ] && rm -f "$staged_notices"
         return 0
     }
     trap cleanup EXIT
@@ -164,6 +177,22 @@ main() {
     # Without -f, a non-200 leaves the error body in the file.
     [ "$have_bundle" = 1 ] || rm -f "$tmp/$BUNDLE"
 
+    # The license texts of the open-source code built into the binary, from
+    # the same release. A release published before the notices asset has
+    # none (404): the binary still installs, with a warning. A failed fetch
+    # also warns and installs, naming the URL to retry. A notices file that
+    # did arrive must match SHA256SUMS like the binary, or nothing installs.
+    have_notices=0
+    notices_code="$(curl -sSL --proto '=https' -o "$tmp/$NOTICES" \
+        -w '%{http_code}' "$base/$NOTICES" 2>/dev/null || true)"
+    case "${notices_code:-000}" in
+        200) have_notices=1 ;;
+        404) warn "this release has no $NOTICES; installing the binary without it" ;;
+        *) warn "could not download $NOTICES; installing the binary without it" \
+            "To fetch it: curl -fsSLO --proto '=https' $base/$NOTICES" ;;
+    esac
+    [ "$have_notices" = 1 ] || rm -f "$tmp/$NOTICES"
+
     # --- verify before making executable ---------------------------------
     want="$(awk -v a="$asset" '$2 == a { print $1 }' "$tmp/SHA256SUMS")"
     [ -n "$want" ] || fail "$asset not listed in SHA256SUMS"
@@ -172,6 +201,15 @@ main() {
         "expected: $want" \
         "got:      $got" \
         "The download may be corrupt or tampered with; nothing was installed."
+    if [ "$have_notices" = 1 ]; then
+        want_notices="$(awk -v a="$NOTICES" '$2 == a { print $1 }' "$tmp/SHA256SUMS")"
+        [ -n "$want_notices" ] || fail "$NOTICES not listed in SHA256SUMS"
+        got_notices="$(sha256 "$tmp/$NOTICES" | awk '{ print $1 }')"
+        [ "$got_notices" = "$want_notices" ] || fail "checksum mismatch for $NOTICES" \
+            "expected: $want_notices" \
+            "got:      $got_notices" \
+            "The download may be corrupt or tampered with; nothing was installed."
+    fi
     echo "Checksum verified."
 
     # --- install ----------------------------------------------------------
@@ -205,8 +243,25 @@ main() {
         fi
     fi
 
+    if [ "$have_notices" = 1 ]; then
+        staged_notices="$INSTALL_DIR/$NOTICES.incoming.$$"
+        if cp "$tmp/$NOTICES" "$staged_notices" \
+            && mv -f "$staged_notices" "$INSTALL_DIR/$NOTICES"; then
+            staged_notices=""
+        else
+            rm -f "$staged_notices"
+            staged_notices=""
+            have_notices=0
+            warn "could not save $NOTICES to $INSTALL_DIR; the binary is installed" \
+                "To fetch it: curl -fsSLO --proto '=https' $base/$NOTICES"
+        fi
+    fi
+
     installed_version="$("$INSTALL_DIR/syl4" version 2>/dev/null)"
     echo "Installed syl4 ${installed_version:-(version unknown)} to $INSTALL_DIR/syl4"
+    if [ "$have_notices" = 1 ]; then
+        echo "Third-party license notices: $INSTALL_DIR/$NOTICES"
+    fi
 
     # The next command comes before the optional security block: almost
     # everyone wants it, and burying it under eight lines of provenance text

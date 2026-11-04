@@ -95,3 +95,6 @@ source repository is private, and `curl` cannot download from a private reposito
 live here. Both files are written and reviewed in the source repository and overwritten here on every release,
 so edits made here would not survive. Issues and pull requests are not monitored — for help, ask your syl4
 contact, the person who gave you your cluster address.
+
+Each release also has `THIRD_PARTY_NOTICES.txt`: the license texts of the open-source Go code built into the
+binaries. The installer saves it beside the binary, as `~/.syl4/bin/THIRD_PARTY_NOTICES.txt`.
